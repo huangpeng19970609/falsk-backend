@@ -3,6 +3,8 @@ from db.config import DB_CONFIG  # 假设您在config.py中定义了数据库配
 from api.article import article_api
 from api.user import user_api
 from api.upload import upload_api
+from api.folder import folder_api
+from models.folder import Folder
 
 from extensions import db, jwt  # 导入已创建的db实例
 from flask_cors import CORS
@@ -48,10 +50,18 @@ def create_app():
     with app.app_context():
         db.create_all()
 
+        # 确保存在根文件夹
+        root_folder = Folder.query.filter_by(name="默认文件夹").first()
+        if not root_folder:
+            root_folder = Folder(name="默认文件夹", is_root=True)
+            db.session.add(root_folder)
+            db.session.commit()
+
     # 7. 最后才注册蓝图
     app.register_blueprint(article_api, url_prefix="/article")  # 注意这里添加了 /api 前缀
     app.register_blueprint(user_api, url_prefix="/user")
     app.register_blueprint(upload_api, url_prefix="/upload")
+    app.register_blueprint(folder_api, url_prefix="/folder")
 
     # 定义根路由
     @app.route('/')
