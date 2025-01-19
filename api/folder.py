@@ -3,17 +3,24 @@ from datetime import datetime
 from typing import List, Union, Optional
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from models.folder import Folder
+from models.article import Article
 from extensions import db
 
 folder_api = Blueprint('folder', __name__)
 
 @folder_api.route('/', methods=["GET"])
 def hello():
+    """健康检查接口"""
     return 'folders'
 
 @folder_api.route('/create', methods=["POST"])
 @jwt_required()
 def create_folder():
+    """创建文件夹
+    请求参数:
+        name: 文件夹名称
+        parent_id: 父文件夹ID
+    """
     data = request.json
     folder_name = data.get('name')
     parent_id = data.get('parent_id')  # 可选参数，指定父文件夹
@@ -75,34 +82,85 @@ def create_folder():
 @folder_api.route('/<int:folder_id>', methods=["GET"])
 @jwt_required()
 def get_folder(folder_id):
-    folder = Folder.query.get(folder_id)
-    
-    if not folder:
+    """获取指定文件夹详情及其直接子项（仅一层）"""
+    try:
+        folder = Folder.query.get(folder_id)
+        if not folder:
+            return jsonify({
+                'code': 500,
+                'data': None,
+                'message': '文件夹不存在'
+            }), 200
+
+        # 修改联合查询，只包含现有字段
+        union_query = db.union_all(
+            db.select(
+                Folder.id,
+                Folder.name,
+                db.literal('FOLDER').label('type'),
+                Folder.created_at,
+                db.literal(True).label('has_children'),
+                db.literal(None).label('content'),
+                db.literal(None).label('updated_at')
+            ).where(Folder.parent_id == folder_id),
+            db.select(
+                Article.id,
+                Article.title.label('name'),
+                db.literal('FILE').label('type'),
+                Article.created_at,
+                db.literal(False).label('has_children'),
+                Article.content,
+                Article.updated_at
+            ).where(Article.parent_id == folder_id)
+        ).subquery()
+
+        # 查询子查询，只包含现有字段
+        direct_children = db.session.query(
+            union_query.c.id,
+            union_query.c.name,
+            union_query.c.type,
+            union_query.c.created_at,
+            union_query.c.has_children,
+            union_query.c.content,
+            union_query.c.updated_at
+        ).order_by(union_query.c.created_at).all()
+
+        return jsonify({
+            'code': 200,
+            'data': {
+                'id': folder.id,
+                'name': folder.name,
+                'created_at': folder.created_at.isoformat(),
+                'updated_at': folder.updated_at.isoformat(),
+                'children': [{
+                    'id': item.id,
+                    'name': item.name,
+                    'type': item.type,
+                    'has_children': item.has_children,
+                    'created_at': item.created_at.isoformat() if item.created_at else None,
+                    'updated_at': item.updated_at.isoformat() if item.updated_at else None,
+                    'content': item.content if item.type == 'FILE' else None
+                } for item in direct_children]
+            },
+            'message': '获取成功'
+        }), 200
+
+    except Exception as e:
         return jsonify({
             'code': 500,
             'data': None,
-            'message': '文件夹不存在'
+            'message': f'获取失败: {str(e)}'
         }), 200
-
-    return jsonify({
-        'code': 200,
-        'data': {
-            'id': folder.id,
-            'name': folder.name,
-            'created_at': folder.created_at.isoformat(),
-            'updated_at': folder.updated_at.isoformat(),
-            'children': [{
-                'id': child.id,
-                'name': child.name,
-                'type': child.node_type.value
-            } for child in folder.children]
-        },
-        'message': '获取成功'
-    }), 200
 
 @folder_api.route('/<int:folder_id>', methods=["PUT"])
 @jwt_required()
 def update_folder(folder_id):
+    """更新文件夹名称
+    参数:
+        folder_id: 文件夹ID
+    请求参数:
+        name: 新的文件夹名称
+    """
     data = request.json
     new_name = data.get('name')
 
@@ -146,6 +204,10 @@ def update_folder(folder_id):
 @folder_api.route('/<int:folder_id>', methods=["DELETE"])
 @jwt_required()
 def delete_folder(folder_id):
+    """删除指定文件夹
+    参数:
+        folder_id: 要删除的文件夹ID
+    """
     folder = Folder.query.get(folder_id)
     
     if not folder:
@@ -175,7 +237,7 @@ def delete_folder(folder_id):
 
 @folder_api.route('/init', methods=["POST"])
 def init_root_folder():
-    """初始化根文件夹"""
+    """初始化根文件夹，如果根文件夹不存在则创建"""
     try:
         # 使用is_root字段来标识根文件夹，而不是依赖name
         root_folder = Folder.query.filter_by(is_root=True).first()
@@ -217,29 +279,66 @@ def init_root_folder():
 @folder_api.route('/list', methods=["GET"])
 @jwt_required()
 def get_folder_list():
+    """获取顶层文件夹列表（仅包含根目录和一级文件夹）"""
     try:
-        # 使用is_root字段查询根文件夹
         root_folder = Folder.query.filter_by(is_root=True).first()
         
-        # 获取其他所有非根文件夹
-        other_folders = Folder.query.filter_by(is_root=False).order_by(Folder.created_at.asc()).all()
-        
-        folders = [root_folder] + other_folders if root_folder else other_folders
-        
+        if root_folder:
+            # 修改联合查询，只包含现有字段
+            union_query = db.union_all(
+                db.select(
+                    Folder.id,
+                    Folder.name,
+                    db.literal('FOLDER').label('type'),
+                    Folder.created_at,
+                    db.literal(True).label('has_children'),
+                    db.literal(None).label('content'),
+                    db.literal(None).label('updated_at')
+                ).where(Folder.parent_id == root_folder.id),
+                db.select(
+                    Article.id,
+                    Article.title.label('name'),
+                    db.literal('FILE').label('type'),
+                    Article.created_at,
+                    db.literal(False).label('has_children'),
+                    Article.content,
+                    Article.updated_at
+                ).where(Article.parent_id == root_folder.id)
+            ).subquery()
+
+            # 查询子查询，只包含现有字段
+            direct_children = db.session.query(
+                union_query.c.id,
+                union_query.c.name,
+                union_query.c.type,
+                union_query.c.created_at,
+                union_query.c.has_children,
+                union_query.c.content,
+                union_query.c.updated_at
+            ).order_by(union_query.c.created_at).all()
+
+            root_data = {
+                'id': root_folder.id,
+                'name': root_folder.name,
+                'created_at': root_folder.created_at.isoformat(),
+                'updated_at': root_folder.updated_at.isoformat(),
+                'is_root': True,
+                'children': [{
+                    'id': item.id,
+                    'name': item.name,
+                    'type': item.type,
+                    'has_children': item.has_children,
+                    'created_at': item.created_at.isoformat() if item.created_at else None,
+                    'updated_at': item.updated_at.isoformat() if item.updated_at else None,
+                    'content': item.content if item.type == 'FILE' else None
+                } for item in direct_children]
+            }
+        else:
+            root_data = None
+
         return jsonify({
             'code': 200,
-            'data': [{
-                'id': folder.id,
-                'name': folder.name,
-                'created_at': folder.created_at.isoformat(),
-                'updated_at': folder.updated_at.isoformat(),
-                'is_root': folder.is_root,  # 添加is_root字段到响应中
-                'children': [{
-                    'id': child.id,
-                    'name': child.name,
-                    'type': child.node_type.value
-                } for child in folder.children]
-            } for folder in folders if folder],
+            'data': root_data,
             'message': '获取成功'
         }), 200
 

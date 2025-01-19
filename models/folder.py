@@ -22,6 +22,9 @@ class Folder(db.Model):
     # 节点类型
     node_type = db.Column(db.Enum(NodeType), default=NodeType.FOLDER, nullable=False)
     
+    # 添加与文章的关联
+    articles = db.relationship('Article', back_populates='parent', cascade='all, delete-orphan')
+    
     def __init__(self, name, parent=None, is_root=False):
         self.name = name
         self.parent = parent

@@ -44,7 +44,11 @@ def create_app():
     app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
     
     db.init_app(app)
+    # 若是初始化迁移 flask db init
+    # 1 若是迁移 flask db migrate -m "add parent_id to articles"
+    # 2 若是升级 flask db upgrade
     migrate = Migrate(app, db)
+
 
     # 6. 创建数据库表
     with app.app_context():

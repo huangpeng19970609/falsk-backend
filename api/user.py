@@ -101,6 +101,7 @@ def login():
              'data': {
                  'token': create_access_token(identity=str(user.id)),
                  'user': {
+                     'id': user.id,
                      'username': user.username,
                  }
              },

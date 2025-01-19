@@ -1,27 +1,67 @@
 from flask import Blueprint, request, jsonify
 from models.article import Article
+from models.folder import Folder
 from extensions import db
 from flask_jwt_extended import jwt_required, get_jwt_identity
 
 article_api = Blueprint('article', __name__)
 
 # 创建文章
-@article_api.route('', methods=["POST"])
+@article_api.route('/create', methods=['POST'])
 @jwt_required()
 def create_article():
-    data = request.get_json()
-    current_user_id = get_jwt_identity()
+    data = request.json
+    parent_id = data.get('parent_id')  # 可以为 None
+    user_id = get_jwt_identity()
+    title = data.get('title', '未命名文档')
     
-    article = Article(
-        title=data['title'],
-        content=data['content'],
-        user_id=current_user_id
-    )
-    
-    db.session.add(article)
-    db.session.commit()
-    
-    return jsonify({'message': '文章创建成功', 'id': article.id, 'code': 200} ), 201
+    try:
+        if parent_id:
+            # 如果指定了父文件夹，验证其存在性
+            parent_folder = Folder.query.get(parent_id)
+            if not parent_folder:
+                return jsonify({
+                    'code': 404,
+                    'message': '指定的父文件夹不存在',
+                    'data': None
+                }), 200
+        else:
+            # 如果没有指定父文件夹，使用根文件夹
+            parent_folder = Folder.query.filter_by(is_root=True).first()
+            if not parent_folder:
+                # 如果根文件夹不存在，创建一个
+                parent_folder = Folder(name="默认文件夹", is_root=True)
+                db.session.add(parent_folder)
+                db.session.commit()
+            parent_id = parent_folder.id
+        
+        new_article = Article(
+            title=title,
+            content='',
+            parent_id=parent_id,
+            user_id=user_id
+        )
+        db.session.add(new_article)
+        db.session.commit()
+        
+        return jsonify({
+            'code': 200,
+            'message': '文章创建成功',
+            'data': {
+                'id': new_article.id,
+                'title': new_article.title,
+                'parent_id': new_article.parent_id,
+                'created_at': new_article.created_at.isoformat()
+            }
+        }), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            'code': 500,
+            'message': f'创建文章失败: {str(e)}',
+            'data': None
+        }), 200
 
 # 获取文章列表
 @article_api.route('/list', methods=["GET"])
