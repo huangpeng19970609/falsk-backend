@@ -107,9 +107,12 @@ def get_article(article_id):
 def update_article(article_id):
     current_user_id = get_jwt_identity()
     article = Article.query.get_or_404(article_id)
+
+    print('current_user_id type:', type(current_user_id))
+    print('article.user_id type:', type(article.user_id))
     
-    # 检查是否是文章作者
-    if article.user_id != current_user_id:
+    # 将两个值转换为相同类型进行比较
+    if str(article.user_id) != str(current_user_id):
         return jsonify({'message': '没有权限修改此文章'}), 403
     
     data = request.get_json()
@@ -128,7 +131,8 @@ def delete_article(article_id):
     article = Article.query.get_or_404(article_id)
     
     # 检查是否是文章作者
-    if article.user_id != current_user_id:
+
+    if str(article.user_id) != str(current_user_id):
         return jsonify({'message': '没有权限删除此文章'}), 403
     
     db.session.delete(article)
