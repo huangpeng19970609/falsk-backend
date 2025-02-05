@@ -80,7 +80,6 @@ def create_folder():
         }), 200
 
 @folder_api.route('/<int:folder_id>', methods=["GET"])
-@jwt_required()
 def get_folder(folder_id):
     """获取指定文件夹详情及其直接子项（仅一层）"""
     try:
@@ -236,6 +235,7 @@ def delete_folder(folder_id):
         }), 200
 
 @folder_api.route('/init', methods=["POST"])
+@jwt_required()
 def init_root_folder():
     """初始化根文件夹，如果根文件夹不存在则创建"""
     try:
